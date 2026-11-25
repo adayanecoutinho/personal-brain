@@ -1,0 +1,17 @@
+# Real data never lives in this repository (see docs/adr/009).
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 from . import search as queries
 
@@ -23,7 +25,8 @@ PENDING_NOTE = (
 
 
 def create_server(db_path: Path) -> MCPServer:
-    server = MCPServer("personal-brain")
+    # WARNING keeps request-level chatter out of the logs (docs/adr/007-no-content-in-logs.md).
+    server = MCPServer("personal-brain", log_level="WARNING")
 
     @server.tool(
         description=f"Search personal records by keywords. {PENDING_NOTE}",
@@ -39,7 +42,12 @@ def create_server(db_path: Path) -> MCPServer:
     def read_entry(id: str) -> dict:
         entry = queries.read_entry(db_path, id)
         if entry is None:
-            return {"error": "not_found", "id": id}
+            return {"error": "not_found"}
         return entry
+
+    @server.custom_route("/health", methods=["GET"], include_in_schema=False)
+    async def health(_: Request) -> PlainTextResponse:
+        # Liveness only: answers without touching records.
+        return PlainTextResponse("ok")
 
     return server

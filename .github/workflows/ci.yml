@@ -17,6 +17,29 @@ jobs:
       - run: uv sync
       - run: uv run pytest -q
 
+  container:
+    # Builds the image, runs it on fictional records and checks that query terms never reach the logs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: docker build -t personal-brain:ci .
+      - name: Run container on fictional records
+        run: |
+          docker run -d --name pb -p 127.0.0.1:8000:8000 \
+            -v "$PWD/examples/records:/data/records:ro" personal-brain:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' pb)" = "healthy" ] && break
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' pb | grep -q healthy
+      - name: Log privacy check (ADR 007)
+        run: |
+          uv sync
+          uv run personal-brain check-logs --url http://127.0.0.1:8000/mcp --logs-command "docker logs pb"
+      - name: Container runs as non-root
+        run: test "$(docker exec pb id -u)" != "0"
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:

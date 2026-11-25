@@ -13,3 +13,4 @@ Each ADR records one decision: the context, what was decided, the alternatives c
 | [007](007-no-content-in-logs.md) | No record content or query terms in logs | Accepted |
 | [008](008-tunnel-before-oauth.md) | Tunnel-only access until OAuth exists | Accepted |
 | [009](009-public-code-private-data.md) | Public code, private data | Accepted |
+| [010](010-container-deployment.md) | Container deployment over Streamable HTTP | Accepted |

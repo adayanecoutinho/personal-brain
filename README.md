@@ -6,6 +6,8 @@ My AI assistants (Claude, ChatGPT and others) don't share a trusted memory, and 
 
 The first domain is **health records**: consultations, exams, prescriptions, medication use and follow-ups. It's a domain where a wrong or invented answer is worse than no answer.
 
+[![ci](https://github.com/adayanecoutinho/personal-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/adayanecoutinho/personal-brain/actions/workflows/ci.yml)
+
 > **Status:** early development (phase 1 of 4). This repository contains code and **fictional data only**. Real records live in a private Git repository on my own server and never touch GitHub ([ADR 009](docs/adr/009-public-code-private-data.md)).
 
 ## What makes it different
@@ -66,6 +68,25 @@ Connect it to Claude Desktop (stdio) by adding to `claude_desktop_config.json`:
   }
 }
 ```
+
+### Run as a container (server deployment)
+
+```sh
+docker build -t personal-brain .
+docker run -d --name personal-brain -p 127.0.0.1:8000:8000 \
+  -v "$PWD/examples/records:/data/records:ro" personal-brain
+# MCP endpoint: http://127.0.0.1:8000/mcp  ·  health: http://127.0.0.1:8000/health
+```
+
+Records are mounted read-only and the index is rebuilt at start ([ADR 010](docs/adr/010-container-deployment.md)).
+
+### Check that queries never reach the logs
+
+```sh
+uv run personal-brain check-logs --url http://127.0.0.1:8000/mcp --logs-command "docker logs personal-brain"
+```
+
+It sends random canary terms through `search` and `read_entry`, then fails if any of them appears in the logs. CI runs it against the built image on every push ([ADR 007](docs/adr/007-no-content-in-logs.md)).
 
 ## Tools
 

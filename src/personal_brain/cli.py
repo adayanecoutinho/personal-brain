@@ -8,17 +8,34 @@ import subprocess
 import sys
 from pathlib import Path
 
+from collections import Counter
+
 from .index import build_index
-from .records import RecordError
+from .records import validate_records
 from .search import search
 
 
-def _build(records: Path, db: Path) -> int:
-    try:
-        count = build_index(records, db)
-    except RecordError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+def _report(records: Path, show_paths: bool) -> int:
+    """Print a validation summary. Returns the number of invalid records.
+
+    By default only fixed error codes and counts are printed: file names can be
+    sensitive and this output may end up in server logs (ADR 007).
+    """
+    valid, errors = validate_records(records)
+    print(f"valid: {len(valid)}  invalid: {len(errors)}", file=sys.stderr)
+    for code, count in sorted(Counter(e.code for e in errors).items()):
+        print(f"  {code}: {count}", file=sys.stderr)
+    if show_paths:
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+    return len(errors)
+
+
+def _build(records: Path, db: Path, show_paths: bool = False) -> int:
+    if _report(records, show_paths):
+        print("BUILD_FAILED: index not changed", file=sys.stderr)
         return 1
+    count = build_index(records, db)
     print(f"indexed {count} records", file=sys.stderr)
     return 0
 
@@ -30,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     build = sub.add_parser("build", help="rebuild the index from a records directory")
     build.add_argument("--records", type=Path, required=True)
     build.add_argument("--db", type=Path, required=True)
+    build.add_argument("--show-paths", action="store_true", help="name invalid files (local use only)")
+
+    check_records = sub.add_parser("validate", help="validate records without building")
+    check_records.add_argument("--records", type=Path, required=True)
+    check_records.add_argument("--show-paths", action="store_true", help="name invalid files (local use only)")
 
     serve = sub.add_parser("serve", help="run the MCP server")
     serve.add_argument("--db", type=Path, required=True)
@@ -57,13 +79,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "build":
-        return _build(args.records, args.db)
+        return _build(args.records, args.db, args.show_paths)
+
+    if args.command == "validate":
+        return 1 if _report(args.records, args.show_paths) else 0
 
     if args.command == "serve":
         from .server import create_server
 
         if args.records is not None and _build(args.records, args.db) != 0:
-            return 1
+            # Keep serving the last good index rather than going down (ADR 012).
+            if not args.db.exists():
+                return 1
+            print("SERVING_PREVIOUS_INDEX", file=sys.stderr)
         domains = None
         if args.domains:
             from .records import DOMAINS

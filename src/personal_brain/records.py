@@ -32,7 +32,17 @@ ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
 
 
 class RecordError(ValueError):
-    """Raised when a file is not a valid record. The message names the source file."""
+    """Raised when a file is not a valid record.
+
+    `code` is a fixed identifier that is safe to log. The message also names the
+    source file, which may itself be sensitive: it is only shown on explicit request
+    (docs/adr/007-no-content-in-logs.md).
+    """
+
+    def __init__(self, code: str, source: str, detail: str):
+        super().__init__(f"{source}: {detail}")
+        self.code = code
+        self.source = source
 
 
 @dataclass(frozen=True)
@@ -51,17 +61,17 @@ class Record:
 def _split_front_matter(text: str, source: str) -> tuple[dict, str]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
-        raise RecordError(f"{source}: missing YAML front matter")
+        raise RecordError("missing_front_matter", source, "missing YAML front matter")
     try:
         end = next(i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---")
     except StopIteration:
-        raise RecordError(f"{source}: unterminated YAML front matter") from None
+        raise RecordError("unterminated_front_matter", source, "unterminated YAML front matter") from None
     try:
         meta = yaml.safe_load("\n".join(lines[1:end])) or {}
     except yaml.YAMLError as exc:
-        raise RecordError(f"{source}: invalid YAML front matter") from exc
+        raise RecordError("invalid_yaml", source, "invalid YAML front matter") from exc
     if not isinstance(meta, dict):
-        raise RecordError(f"{source}: front matter must be a mapping")
+        raise RecordError("invalid_yaml", source, "front matter must be a mapping")
     body = "\n".join(lines[end + 1 :]).strip()
     return meta, body
 
@@ -70,9 +80,9 @@ def domain_of(source: str) -> str:
     """The domain is the first folder of the record's relative path."""
     parts = source.split("/")
     if len(parts) < 2:
-        raise RecordError(f"{source}: records must live inside a domain folder")
+        raise RecordError("outside_domain", source, "records must live inside a domain folder")
     if parts[0] not in DOMAINS:
-        raise RecordError(f"{source}: unknown domain {parts[0]!r}")
+        raise RecordError("unknown_domain", source, f"unknown domain {parts[0]!r}")
     return parts[0]
 
 
@@ -83,7 +93,7 @@ def parse_record(text: str, source: str) -> Record:
 
     missing = [field for field in REQUIRED_FIELDS if meta.get(field) in (None, "")]
     if missing:
-        raise RecordError(f"{source}: missing required fields: {', '.join(missing)}")
+        raise RecordError("missing_fields", source, f"missing required fields: {', '.join(missing)}")
 
     record_id = str(meta["id"])
     event_type = str(meta["event_type"])
@@ -91,13 +101,15 @@ def parse_record(text: str, source: str) -> Record:
     review_status = str(meta["review_status"])
 
     if not ID_PATTERN.match(record_id):
-        raise RecordError(f"{source}: invalid id {record_id!r}")
+        raise RecordError("invalid_id", source, f"invalid id {record_id!r}")
     if event_type not in DOMAIN_EVENT_TYPES[domain]:
-        raise RecordError(f"{source}: unknown event_type {event_type!r} for domain {domain!r}")
+        raise RecordError(
+            "unknown_event_type", source, f"unknown event_type {event_type!r} for domain {domain!r}"
+        )
     if review_status not in REVIEW_STATUSES:
-        raise RecordError(f"{source}: unknown review_status {review_status!r}")
+        raise RecordError("unknown_review_status", source, f"unknown review_status {review_status!r}")
     if not DATE_PATTERN.match(date):
-        raise RecordError(f"{source}: date must be YYYY, YYYY-MM or YYYY-MM-DD")
+        raise RecordError("invalid_date", source, "date must be YYYY, YYYY-MM or YYYY-MM-DD")
 
     return Record(
         id=record_id,
@@ -112,17 +124,36 @@ def parse_record(text: str, source: str) -> Record:
     )
 
 
-def load_records(root: Path) -> list[Record]:
-    """Load every `*.md` record under `root`. Duplicate ids are an error."""
+def validate_records(root: Path) -> tuple[list[Record], list[RecordError]]:
+    """Parse every `*.md` record under `root`, collecting all errors instead of stopping."""
     records: list[Record] = []
+    errors: list[RecordError] = []
     seen: dict[str, str] = {}
     for path in sorted(root.rglob("*.md")):
         source = path.relative_to(root).as_posix()
-        record = parse_record(path.read_text(encoding="utf-8"), source)
+        try:
+            record = parse_record(path.read_text(encoding="utf-8"), source)
+        except RecordError as exc:
+            errors.append(exc)
+            continue
+        except UnicodeDecodeError:
+            errors.append(RecordError("not_utf8", source, "file is not valid UTF-8"))
+            continue
         if record.id in seen:
-            raise RecordError(
-                f"{source}: duplicate id {record.id!r} (also in {seen[record.id]})"
+            errors.append(
+                RecordError(
+                    "duplicate_id", source, f"duplicate id {record.id!r} (also in {seen[record.id]})"
+                )
             )
+            continue
         seen[record.id] = source
         records.append(record)
+    return records, errors
+
+
+def load_records(root: Path) -> list[Record]:
+    """Load every `*.md` record under `root`. Any invalid record is an error."""
+    records, errors = validate_records(root)
+    if errors:
+        raise errors[0]
     return records

@@ -54,6 +54,7 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 uv run personal-brain build --records examples/records --db data/index.db
 uv run personal-brain search --db data/index.db "moisturizer"
+uv run personal-brain validate --records examples/records   # counts per error code; add --show-paths locally
 uv run pytest
 ```
 

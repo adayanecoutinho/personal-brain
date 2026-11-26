@@ -66,3 +66,21 @@ def test_failed_rebuild_keeps_the_previous_index(db, tmp_path):
     with pytest.raises(RecordError):
         build_index(broken, db)
     assert search(db, "moisturizer")  # old index still serves
+
+
+def test_results_carry_their_domain(db):
+    assert {r["domain"] for r in search(db, "fictional", limit=20)} == {"health", "training"}
+
+
+def test_domain_filter(db):
+    results = search(db, "fictional", limit=20, domains=["training"])
+    assert results and {r["domain"] for r in results} == {"training"}
+
+
+def test_empty_scope_sees_nothing(db):
+    assert search(db, "fictional", domains=[]) == []
+
+
+def test_read_entry_respects_scope(db):
+    assert read_entry(db, "exam-2026-04-02-blood", domains=["health"]) is not None
+    assert read_entry(db, "exam-2026-04-02-blood", domains=["training"]) is None

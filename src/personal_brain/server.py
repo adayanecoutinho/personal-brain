@@ -3,10 +3,14 @@
 Two tools only (docs/adr/006-read-only-tools-first.md). Tool descriptions tell the
 client how to treat pending records, because the model reading the result is the
 one that must not present them as facts.
+
+`allowed_domains` is the server's scope (docs/adr/011-domains-and-scopes.md). Today
+it is set per deployment; from phase 3 it comes from the OAuth client's scopes.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -24,24 +28,33 @@ PENDING_NOTE = (
 )
 
 
-def create_server(db_path: Path) -> MCPServer:
+def create_server(db_path: Path, allowed_domains: Iterable[str] | None = None) -> MCPServer:
+    scope = None if allowed_domains is None else sorted(set(allowed_domains))
+    scope_note = f" Domains available: {', '.join(scope)}." if scope is not None else ""
+
     # WARNING keeps request-level chatter out of the logs (docs/adr/007-no-content-in-logs.md).
     server = MCPServer("personal-brain", log_level="WARNING")
 
     @server.tool(
-        description=f"Search personal records by keywords. {PENDING_NOTE}",
+        description=(
+            "Search personal records by keywords, optionally within one domain "
+            f"(for example 'health' or 'training').{scope_note} {PENDING_NOTE}"
+        ),
         annotations=READ_ONLY,
     )
-    def search(query: str, limit: int = 5) -> list[dict]:
-        return queries.search(db_path, query, limit)
+    def search(query: str, limit: int = 5, domain: str | None = None) -> list[dict]:
+        return queries.search(
+            db_path, query, limit, queries.effective_domains(scope, domain)
+        )
 
     @server.tool(
-        description=f"Read one full record by its id. {PENDING_NOTE}",
+        description=f"Read one full record by its id.{scope_note} {PENDING_NOTE}",
         annotations=READ_ONLY,
     )
     def read_entry(id: str) -> dict:
-        entry = queries.read_entry(db_path, id)
+        entry = queries.read_entry(db_path, id, scope)
         if entry is None:
+            # Same answer for "missing" and "outside your scope": existence is not leaked.
             return {"error": "not_found"}
         return entry
 

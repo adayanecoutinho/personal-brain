@@ -17,6 +17,7 @@ SCHEMA = """
 CREATE TABLE records (
     rowid INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
+    domain TEXT NOT NULL,
     event_type TEXT NOT NULL,
     date TEXT NOT NULL,
     review_status TEXT NOT NULL,
@@ -47,10 +48,14 @@ def build_index(records_dir: Path, db_path: Path) -> int:
     try:
         conn.executescript(SCHEMA)
         conn.executemany(
-            "INSERT INTO records (id, event_type, date, review_status, title, body, source, sha256)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO records"
+            " (id, domain, event_type, date, review_status, title, body, source, sha256)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                (r.id, r.event_type, r.date, r.review_status, r.title, r.body, r.source, r.sha256)
+                (
+                    r.id, r.domain, r.event_type, r.date, r.review_status,
+                    r.title, r.body, r.source, r.sha256,
+                )
                 for r in records
             ],
         )

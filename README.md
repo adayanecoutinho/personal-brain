@@ -4,7 +4,7 @@
 
 My AI assistants (Claude, ChatGPT and others) don't share a trusted memory, and when they answer from my notes they rarely say where the answer came from. Personal Brain is a small, self-hosted service that gives any MCP client read access to my personal records. Every result carries the record id, its source file, a content hash and a review status, so the assistant can cite it and I can verify it.
 
-The first domain is **health records**: consultations, exams, prescriptions, medication use and follow-ups. It's a domain where a wrong or invented answer is worse than no answer.
+The first domain is **health records**: consultations, exams, prescriptions, medication use and follow-ups. It's a domain where a wrong or invented answer is worse than no answer. Other domains, such as training methodology, live side by side, and each client only sees the domains it was granted ([ADR 011](docs/adr/011-domains-and-scopes.md)).
 
 [![ci](https://github.com/adayanecoutinho/personal-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/adayanecoutinho/personal-brain/actions/workflows/ci.yml)
 
@@ -16,6 +16,7 @@ The first domain is **health records**: consultations, exams, prescriptions, med
 - **Pending is not a fact.** Anything an AI extracts (say, from a photo of a prescription) is stored as `pending` until I confirm it. Pending records are flagged on every result ([ADR 005](docs/adr/005-pending-before-confirmed.md)).
 - **Prescribed is not taken.** A prescription and the actual medication use are separate records ([ADR 004](docs/adr/004-markdown-yaml-records.md)).
 - **No invented dates.** A record dated `2026-03` keeps month precision; nothing fills in a day.
+- **Least privilege per client.** Records are grouped by domain (`health`, `training`, ...). A client scoped to `training` never sees health records, not even whether they exist ([ADR 011](docs/adr/011-domains-and-scopes.md)).
 - **Read-only first, private by default.** Two read tools only, a read-only database connection, and no record content or query terms in logs ([ADR 006](docs/adr/006-read-only-tools-first.md), [ADR 007](docs/adr/007-no-content-in-logs.md)).
 
 ## Architecture
@@ -92,7 +93,7 @@ It sends random canary terms through `search` and `read_entry`, then fails if an
 
 | Tool | Purpose | Returns |
 |---|---|---|
-| `search(query, limit=5)` | Full-text search over all records | `id`, `event_type`, `date`, `review_status`, `title`, `snippet`, `source`, `sha256` |
+| `search(query, limit=5, domain=None)` | Full-text search within the caller's scope, optionally narrowed to one domain | `id`, `domain`, `event_type`, `date`, `review_status`, `title`, `snippet`, `source`, `sha256` |
 | `read_entry(id)` | Read one full record | All fields plus `body` |
 
 ## Roadmap

@@ -1,6 +1,6 @@
 # 004. Records as Markdown with YAML front matter
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [ADR 011](011-domains-and-scopes.md) (event types are declared per domain)
 - **Date:** 2026-11-25
 
 ## Context

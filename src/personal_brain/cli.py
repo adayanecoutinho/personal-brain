@@ -37,11 +37,16 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--domains",
+        help="comma-separated scope, e.g. 'training'; default: all domains",
+    )
 
     find = sub.add_parser("search", help="search the index and print JSON")
     find.add_argument("--db", type=Path, required=True)
     find.add_argument("query")
     find.add_argument("--limit", type=int, default=5)
+    find.add_argument("--domain")
 
     check = sub.add_parser("check-logs", help="verify that query terms never reach the logs")
     check.add_argument("--url", required=True, help="MCP endpoint, e.g. http://127.0.0.1:8000/mcp")
@@ -59,7 +64,16 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.records is not None and _build(args.records, args.db) != 0:
             return 1
-        server = create_server(args.db)
+        domains = None
+        if args.domains:
+            from .records import DOMAINS
+
+            domains = [d.strip() for d in args.domains.split(",") if d.strip()]
+            unknown = sorted(set(domains) - DOMAINS)
+            if unknown:
+                print(f"error: unknown domain(s): {', '.join(unknown)}", file=sys.stderr)
+                return 1
+        server = create_server(args.db, domains)
         if args.transport == "http":
             server.run("streamable-http", host=args.host, port=args.port)
         else:
@@ -86,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to a legacy code page
-    print(json.dumps(search(args.db, args.query, args.limit), ensure_ascii=False, indent=2))
+    domains = [args.domain] if args.domain else None
+    results = search(args.db, args.query, args.limit, domains)
+    print(json.dumps(results, ensure_ascii=False, indent=2))
     return 0
 
 

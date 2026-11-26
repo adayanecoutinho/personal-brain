@@ -15,7 +15,7 @@ This document explains how Personal Brain is built and why. Each decision links 
 ```mermaid
 flowchart TB
     subgraph data[Private data repository on the server]
-        MD[records/*.md<br/>YAML front matter + Markdown body]
+        MD[records/&lt;domain&gt;/**/*.md<br/>YAML front matter + Markdown body]
         ATT[attachments/<br/>original PDFs and photos]
     end
 
@@ -43,10 +43,13 @@ flowchart TB
 
 ## Record model
 
+The first folder of a record's path is its **domain** (`health`, `training`, ...). Each domain declares its own event types, and every caller has a scope: the set of domains it may read ([ADR 011](docs/adr/011-domains-and-scopes.md)).
+
 ```yaml
+# records/health/prescriptions/2026-03-12-moisturizer.md
 ---
 id: rx-2026-03-12-moisturizer     # stable, opaque, unique
-event_type: prescription          # encounter | exam | prescription | medication_use | follow_up
+event_type: prescription          # health: encounter | exam | prescription | medication_use | follow_up
 date: 2026-03-12                  # YYYY, YYYY-MM or YYYY-MM-DD: precision is preserved
 review_status: confirmed          # pending | confirmed
 title: "Prescription: fragrance-free moisturizer"
@@ -110,6 +113,7 @@ sequenceDiagram
 | Sensitive terms leaking through logs or URLs | No logging of queries or record content. MCP tool arguments travel in the request body, never in a URL ([ADR 007](docs/adr/007-no-content-in-logs.md)). |
 | Query injection into FTS5 | Every user token is quoted; operators in input are treated as text. Covered by tests. |
 | Accidental writes through the query path | The query layer opens SQLite in read-only mode. Covered by tests. |
+| A client reading another domain's data (for example a training coach reading health records) | Per-caller domain scope enforced in SQL; out-of-scope records look exactly like missing ones ([ADR 011](docs/adr/011-domains-and-scopes.md)). |
 | AI hallucinations stored as facts | `pending` status, flagged in every result and in tool descriptions ([ADR 005](docs/adr/005-pending-before-confirmed.md)). |
 | Data loss | Git history plus an encrypted off-site backup. A restore drill must pass before real data is migrated. |
 | Real data reaching the public repository | Real data never lives here; `.gitignore` blocks data files and CI runs a secret scan on every push ([ADR 009](docs/adr/009-public-code-private-data.md)). |

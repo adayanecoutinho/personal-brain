@@ -70,6 +70,12 @@ def main(argv: list[str] | None = None) -> int:
     find.add_argument("--limit", type=int, default=5)
     find.add_argument("--domain")
 
+    run_eval = sub.add_parser("eval", help="run the retrieval evaluation")
+    run_eval.add_argument("--cases", type=Path, required=True)
+    run_eval.add_argument("--records", type=Path, required=True)
+    run_eval.add_argument("--markdown", type=Path, help="write the summary table here")
+    run_eval.add_argument("--json", type=Path, help="write the full report here")
+
     check = sub.add_parser("check-logs", help="verify that query terms never reach the logs")
     check.add_argument("--url", required=True, help="MCP endpoint, e.g. http://127.0.0.1:8000/mcp")
     source = check.add_mutually_exclusive_group(required=True)
@@ -77,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--logs-command", help='e.g. "docker logs personal-brain"')
 
     args = parser.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to a legacy code page
 
     if args.command == "build":
         return _build(args.records, args.db, args.show_paths)
@@ -108,6 +116,28 @@ def main(argv: list[str] | None = None) -> int:
             server.run()
         return 0
 
+    if args.command == "eval":
+        import tempfile
+
+        from .evaluation import evaluate, is_passing, load_cases, to_markdown
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "eval.db"
+            if _build(args.records, db) != 0:
+                return 1
+            report = evaluate(db, load_cases(args.cases))
+        summary = to_markdown(report)
+        print(summary)
+        # Failures list case ids and reason codes only, never queries or record content.
+        for failure in report["failures"]:
+            tag = "FAIL" if failure["gating"] else "info"
+            print(f"{tag} {failure['id']}: {', '.join(failure['reasons'])}")
+        if args.markdown:
+            args.markdown.write_text(summary, encoding="utf-8")
+        if args.json:
+            args.json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        return 0 if is_passing(report) else 1
+
     if args.command == "check-logs":
         from .logcheck import run_check
 
@@ -126,8 +156,6 @@ def main(argv: list[str] | None = None) -> int:
         print("PASS: no query terms found in the logs")
         return 0
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to a legacy code page
     domains = [args.domain] if args.domain else None
     results = search(args.db, args.query, args.limit, domains)
     print(json.dumps(results, ensure_ascii=False, indent=2))

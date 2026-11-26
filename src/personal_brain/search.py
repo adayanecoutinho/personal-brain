@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Iterable
+from contextlib import closing
 from pathlib import Path
 
 MAX_LIMIT = 20
@@ -66,7 +67,7 @@ def search(
         return []
     limit = max(1, min(int(limit), MAX_LIMIT))
     where, params = _domain_filter(domains)
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:  # sqlite3's own context manager doesn't close
         rows = conn.execute(
             f"""
             SELECT r.id, r.domain, r.event_type, r.date, r.review_status, r.title,
@@ -88,7 +89,7 @@ def read_entry(
 ) -> dict | None:
     """One full record by id, or None if it doesn't exist or is outside `domains`."""
     where, params = _domain_filter(domains)
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:  # sqlite3's own context manager doesn't close
         row = conn.execute(
             "SELECT r.id, r.domain, r.event_type, r.date, r.review_status, r.title, r.body,"
             f" r.source, r.sha256 FROM records r WHERE r.id = ?{where}",

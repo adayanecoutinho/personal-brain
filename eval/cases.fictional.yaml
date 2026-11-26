@@ -1,0 +1,149 @@
+# Fictional evaluation set. Mirrors the categories of the private set used on real data
+# (docs/adr/013-evaluation.md). Each case is what a client would send to `search`.
+#
+# Fields:
+#   query          keywords sent to search
+#   scope          domains the caller may read (default: all)
+#   expected_ids   every one of these must appear in the top 5
+#   expect_empty   the answer must be "nothing found"
+#   expected_status   review_status every expected record must carry
+#   forbid_types   event types that must not appear in the results
+#   gating         false = informational only (does not fail the run)
+
+cases:
+  # --- Encounters -----------------------------------------------------------
+  - id: enc-last-gastro
+    category: encounters
+    question: When was my last gastroenterology consultation?
+    query: gastroenterology
+    expected_ids: [enc-2026-05-08-gastro, enc-2026-01-20-gastro]
+
+  - id: enc-reflux-doctor
+    category: encounters
+    question: Who treated my reflux?
+    query: reflux
+    expected_ids: [enc-2026-01-20-gastro, enc-2026-05-08-gastro]
+
+  - id: enc-dermatology
+    category: encounters
+    question: When did I see the dermatologist?
+    query: dermatology
+    expected_ids: [enc-2026-03-12-derm]
+
+  - id: enc-year-only
+    category: encounters
+    question: When was my last eye check-up?
+    query: ophthalmology
+    expected_ids: [enc-2025-ophthalmology]
+
+  # --- Prescription vs actual use ------------------------------------------
+  - id: rx-vitamin-not-started
+    category: prescription_vs_use
+    question: Which vitamins were prescribed, and did I start them?
+    query: vitamin
+    expected_ids: [rx-2026-05-08-vitamin-d]
+    forbid_types: [medication_use]
+
+  - id: use-omeprazole-confirmed
+    category: prescription_vs_use
+    question: Which omeprazole dose did I actually take?
+    query: omeprazole
+    expected_ids: [rx-2026-01-20-omeprazole, use-2026-02-omeprazole]
+
+  - id: use-moisturizer
+    category: prescription_vs_use
+    question: Was the moisturizer prescribed, and did I use it?
+    query: moisturizer
+    expected_ids: [rx-2026-03-12-moisturizer, use-2026-03-moisturizer]
+
+  # --- Exams ----------------------------------------------------------------
+  - id: exam-pap-dates
+    category: exams
+    question: When was my Pap smear collected and released?
+    query: pap smear
+    expected_ids: [exam-2026-02-10-pap]
+
+  - id: exam-blood-conclusion
+    category: exams
+    question: What was the conclusion of my blood count?
+    query: blood count
+    expected_ids: [exam-2026-04-02-blood]
+
+  - id: exam-ordered-no-result
+    category: exams
+    question: Is there an exam ordered without a result?
+    query: ultrasound
+    expected_ids: [exam-2026-06-ultrasound]
+    expected_status: pending
+
+  # --- Pending data ---------------------------------------------------------
+  - id: pending-allergy
+    category: pending
+    question: Was I referred to an allergist?
+    query: allergist
+    expected_ids: [fu-2026-05-allergy]
+    expected_status: pending
+
+  # --- No answer ------------------------------------------------------------
+  - id: none-mri
+    category: no_answer
+    question: When was my last MRI?
+    query: MRI
+    expect_empty: true
+
+  - id: none-cardiology
+    category: no_answer
+    question: Did I ever see a cardiologist?
+    query: cardiology
+    expect_empty: true
+
+  # --- Scope (ADR 011) ------------------------------------------------------
+  - id: scope-training-cannot-see-health
+    category: scope
+    question: (training coach) What was the blood count result?
+    query: blood count
+    scope: [training]
+    expect_empty: true
+
+  - id: scope-training-methodology
+    category: scope
+    question: (training coach) How do I progress the load?
+    query: progressive overload
+    scope: [training]
+    expected_ids: [train-method-progressive-overload]
+
+  - id: scope-training-restriction
+    category: scope
+    question: (training coach) Is there any restriction on axial load?
+    query: axial
+    scope: [training]
+    expected_ids: [train-restriction-axial-load]
+
+  - id: scope-health-cannot-see-training
+    category: scope
+    question: (health client) What is my training methodology?
+    query: overload
+    scope: [health]
+    expect_empty: true
+
+  # --- Paraphrases (informational: measures the limit of keyword search) ----
+  - id: para-stomach-doctor
+    category: paraphrase
+    question: When did I see the stomach doctor?
+    query: stomach doctor
+    expected_ids: [enc-2026-05-08-gastro]
+    gating: false
+
+  - id: para-skin-specialist
+    category: paraphrase
+    question: When did I see the skin specialist?
+    query: skin specialist
+    expected_ids: [enc-2026-03-12-derm]
+    gating: false
+
+  - id: para-heartburn
+    category: paraphrase
+    question: What did I take for heartburn?
+    query: heartburn medicine
+    expected_ids: [use-2026-02-omeprazole]
+    gating: false

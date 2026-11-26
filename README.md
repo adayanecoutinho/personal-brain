@@ -90,6 +90,28 @@ uv run personal-brain check-logs --url http://127.0.0.1:8000/mcp --logs-command 
 
 It sends random canary terms through `search` and `read_entry`, then fails if any of them appears in the logs. CI runs it against the built image on every push ([ADR 007](docs/adr/007-no-content-in-logs.md)).
 
+## Evaluation
+
+Retrieval is measured on every push against a fictional twin of the private evaluation set ([ADR 013](docs/adr/013-evaluation.md)). The same command runs on the server against real records; that set and its results stay private.
+
+```sh
+uv run personal-brain eval --cases eval/cases.fictional.yaml --records examples/records
+```
+
+Current results ([eval/results.fictional.md](eval/results.fictional.md)):
+
+| Category | Passed | Counts toward pass/fail |
+|---|---|---|
+| encounters | 4/4 | yes |
+| prescription vs use | 3/3 | yes |
+| exams | 3/3 | yes |
+| pending data | 1/1 | yes |
+| no answer | 2/2 | yes |
+| scope (least privilege) | 4/4 | yes |
+| paraphrases | 0/3 | no, informational |
+
+**17/17 gating cases, 0 scope violations, MRR 0.962.** Paraphrases ("stomach doctor" for gastroenterology) fail today: that is the measured limit of keyword search, and the evidence any move to semantic search has to beat.
+
 ## Tools
 
 | Tool | Purpose | Returns |

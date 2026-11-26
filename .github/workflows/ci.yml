@@ -16,6 +16,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run pytest -q
+      - name: Retrieval evaluation (fictional set, ADR 013)
+        run: uv run personal-brain eval --cases eval/cases.fictional.yaml --records examples/records
 
   container:
     # Builds the image, runs it on fictional records and checks that query terms never reach the logs.

@@ -24,7 +24,7 @@ def test_validate_reports_codes_without_file_names(tmp_path, capsys):
     records = _records_with_one_invalid(tmp_path)
     assert main(["validate", "--records", str(records)]) == 1
     err = capsys.readouterr().err
-    assert "valid: 8  invalid: 1" in err
+    assert "valid: 15  invalid: 1" in err
     assert "missing_front_matter: 1" in err
     assert "very-private-name" not in err
 

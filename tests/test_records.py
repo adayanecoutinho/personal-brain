@@ -59,7 +59,7 @@ def test_duplicate_ids_are_rejected(tmp_path):
 
 def test_example_records_are_valid(examples_dir):
     records = load_records(examples_dir)
-    assert len(records) == 8
+    assert len(records) == 15
     assert {r.review_status for r in records} == {"pending", "confirmed"}
 
 

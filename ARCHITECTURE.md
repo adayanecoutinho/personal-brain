@@ -120,14 +120,14 @@ sequenceDiagram
 
 A known trade-off: when an MCP client uses a record to answer, the retrieved text is sent to that client's model provider. This is accepted by the owner and is the reason the service returns snippets and single records, never bulk exports.
 
-## Evaluation (phase 2)
+## Evaluation
 
-A fixed set of questions, each with its expected record. Metrics:
+A fixed set of cases, each with its expected records, runs through `search` on every push ([ADR 013](docs/adr/013-evaluation.md)). It checks:
 
-- retrieval (expected record in the top 5);
-- faithfulness of the answer;
-- correct handling of pending and missing data;
-- presence of the citation;
-- scope violations.
+- retrieval (all expected records in the top 5);
+- review status of pending data;
+- forbidden event types (a prescription must not show up as use);
+- empty answers when nothing exists;
+- scope violations, on every case.
 
-The real question set stays private; a fictional twin runs in CI. Semantic search (embeddings) is only added if the evaluation shows a failure that full-text search can't fix.
+The real question set stays on the server; a fictional twin runs in CI. Paraphrase cases are measured but don't gate: they show where keyword search stops, and semantic search is only added if it raises them without breaking the rest.

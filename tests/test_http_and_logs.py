@@ -60,7 +60,7 @@ def test_health_endpoint(http_server):
 
 def test_query_terms_never_reach_the_logs(http_server):
     base, log_path = http_server
-    leaks = run_check(f"{base}/mcp", lambda: log_path.read_text(encoding="utf-8"))
+    leaks = run_check(f"{base}/mcp", lambda: log_path.read_text(encoding="utf-8", errors="replace"))
     assert leaks == []
 
 

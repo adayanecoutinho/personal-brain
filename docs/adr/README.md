@@ -16,3 +16,4 @@ Each ADR records one decision: the context, what was decided, the alternatives c
 | [010](010-container-deployment.md) | Container deployment over Streamable HTTP | Accepted |
 | [011](011-domains-and-scopes.md) | Domains and per-client scopes | Accepted |
 | [012](012-invalid-records-degrade-gracefully.md) | Invalid records degrade gracefully and are reported as codes | Accepted |
+| [013](013-evaluation.md) | Retrieval evaluation with a fictional twin of the private set | Accepted |

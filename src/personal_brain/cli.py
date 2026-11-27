@@ -6,9 +6,8 @@ import argparse
 import json
 import subprocess
 import sys
-from pathlib import Path
-
 from collections import Counter
+from pathlib import Path
 
 from .index import build_index
 from .records import validate_records
@@ -40,6 +39,18 @@ def _build(records: Path, db: Path, show_paths: bool = False) -> int:
     return 0
 
 
+def _parse_domains(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    from .records import DOMAINS
+
+    domains = [d.strip() for d in raw.split(",") if d.strip()]
+    unknown = sorted(set(domains) - DOMAINS)
+    if unknown:
+        raise ValueError(f"unknown domain(s): {', '.join(unknown)}")
+    return domains
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="personal-brain")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -63,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         "--domains",
         help="comma-separated scope, e.g. 'training'; default: all domains",
     )
+    serve.add_argument(
+        "--auth",
+        action="store_true",
+        help="enable the public authorization server (refuses to start if settings are missing)",
+    )
+    serve.add_argument("--auth-db", type=Path, help="SQLite file for tokens and clients")
+    serve.add_argument("--public-url", help="public issuer and resource base URL, no trailing slash")
 
     find = sub.add_parser("search", help="search the index and print JSON")
     find.add_argument("--db", type=Path, required=True)
@@ -82,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--log-file", type=Path)
     source.add_argument("--logs-command", help='e.g. "docker logs personal-brain"')
 
+    from .auth.cli import add_auth_parser
+
+    add_auth_parser(sub)
+
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to a legacy code page
@@ -92,23 +114,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate":
         return 1 if _report(args.records, args.show_paths) else 0
 
-    if args.command == "serve":
-        from .server import create_server
+    if args.command == "auth":
+        from .auth.cli import run_auth_command
 
+        return run_auth_command(args)
+
+    if args.command == "serve":
         if args.records is not None and _build(args.records, args.db) != 0:
             # Keep serving the last good index rather than going down (ADR 012).
             if not args.db.exists():
                 return 1
             print("SERVING_PREVIOUS_INDEX", file=sys.stderr)
-        domains = None
-        if args.domains:
-            from .records import DOMAINS
+        try:
+            domains = _parse_domains(args.domains)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
-            domains = [d.strip() for d in args.domains.split(",") if d.strip()]
-            unknown = sorted(set(domains) - DOMAINS)
-            if unknown:
-                print(f"error: unknown domain(s): {', '.join(unknown)}", file=sys.stderr)
-                return 1
+        if args.auth:
+            return _serve_public(args, domains)
+        from .server import create_server
+
         server = create_server(args.db, domains)
         if args.transport == "http":
             server.run("streamable-http", host=args.host, port=args.port)
@@ -159,6 +185,26 @@ def main(argv: list[str] | None = None) -> int:
     domains = [args.domain] if args.domain else None
     results = search(args.db, args.query, args.limit, domains)
     print(json.dumps(results, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _serve_public(args: argparse.Namespace, domains: list[str] | None) -> int:
+    from .auth.app import build_authenticated_server, wrap_app
+    from .auth.config import load_auth_config, missing_auth_settings
+
+    if args.transport != "http":
+        print("error: --auth requires --transport http", file=sys.stderr)
+        return 1
+    missing = missing_auth_settings(public_url=args.public_url, auth_db=args.auth_db)
+    if missing:
+        print("error: --auth is missing: " + ", ".join(missing), file=sys.stderr)
+        return 1
+    config = load_auth_config(public_url=args.public_url, auth_db=args.auth_db)
+    server, _provider = build_authenticated_server(args.db, config, domains)
+    app = wrap_app(server.streamable_http_app(host=args.host), config.token_pepper)
+    import uvicorn
+
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
 

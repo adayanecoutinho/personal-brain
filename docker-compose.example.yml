@@ -1,0 +1,66 @@
+# Example only. Values are fictional. Do not apply this file as-is.
+# brain-private stays off the reverse proxy and is reached through the SSH tunnel.
+# brain-public is the only service with proxy labels and must run with --auth.
+
+services:
+  brain-private:
+    image: personal-brain:local
+    command:
+      - personal-brain
+      - serve
+      - --transport
+      - http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --records
+      - /data/records
+      - --db
+      - /data/index/index.db
+    volumes:
+      - records:/data/records:ro
+      - index-private:/data/index
+    restart: unless-stopped
+
+  brain-public:
+    image: personal-brain:local
+    command:
+      - personal-brain
+      - serve
+      - --transport
+      - http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --records
+      - /data/records
+      - --db
+      - /data/index/index.db
+      - --auth
+      - --auth-db
+      - /data/auth/auth.db
+      - --public-url
+      - https://brain.example.invalid
+    environment:
+      GITHUB_CLIENT_ID: "replace-me"
+      GITHUB_CLIENT_SECRET: "replace-me"
+      ALLOWED_GITHUB_USER_ID: "0"
+      TOKEN_PEPPER: "replace-me-with-a-long-random-value"
+    volumes:
+      - records:/data/records:ro
+      - index-public:/data/index
+      - auth:/data/auth
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.brain-public.rule=Host(`brain.example.invalid`)
+      - traefik.http.routers.brain-public.tls=true
+      - traefik.http.services.brain-public.loadbalancer.server.port=8000
+    restart: unless-stopped
+
+volumes:
+  records:
+  index-private:
+  index-public:
+  auth:

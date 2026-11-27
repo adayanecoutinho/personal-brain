@@ -12,6 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from .records import load_records
+from .search import date_bounds
 
 SCHEMA = """
 CREATE TABLE records (
@@ -20,6 +21,8 @@ CREATE TABLE records (
     domain TEXT NOT NULL,
     event_type TEXT NOT NULL,
     date TEXT NOT NULL,
+    date_start TEXT NOT NULL,  -- first day the partial date can mean
+    date_end TEXT NOT NULL,    -- last day the partial date can mean
     review_status TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
@@ -49,11 +52,13 @@ def build_index(records_dir: Path, db_path: Path) -> int:
         conn.executescript(SCHEMA)
         conn.executemany(
             "INSERT INTO records"
-            " (id, domain, event_type, date, review_status, title, body, source, sha256)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " (id, domain, event_type, date, date_start, date_end,"
+            "  review_status, title, body, source, sha256)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
-                    r.id, r.domain, r.event_type, r.date, r.review_status,
+                    r.id, r.domain, r.event_type, r.date, *date_bounds(r.date),
+                    r.review_status,
                     r.title, r.body, r.source, r.sha256,
                 )
                 for r in records

@@ -105,18 +105,20 @@ Current results ([eval/results.fictional.md](eval/results.fictional.md)):
 | encounters | 4/4 | yes |
 | prescription vs use | 3/3 | yes |
 | exams | 3/3 | yes |
-| pending data | 1/1 | yes |
+| pending data | 2/2 | yes |
 | no answer | 2/2 | yes |
 | scope (least privilege) | 4/4 | yes |
+| word variants (prefix) | 2/2 | yes |
+| timeline (period filter) | 3/3 | yes |
 | paraphrases | 0/3 | no, informational |
 
-**17/17 gating cases, 0 scope violations, MRR 0.962.** Paraphrases ("stomach doctor" for gastroenterology) fail today: that is the measured limit of keyword search, and the evidence any move to semantic search has to beat.
+**23/23 gating cases, 0 scope violations, MRR 0.972.** Paraphrases that are true synonyms ("stomach doctor" for gastroenterology) still fail: that is the measured limit of keyword search, and the evidence any move to semantic search has to beat.
 
 ## Tools
 
 | Tool | Purpose | Returns |
 |---|---|---|
-| `search(query, limit=5, domain=None)` | Full-text search within the caller's scope, optionally narrowed to one domain | `id`, `domain`, `event_type`, `date`, `review_status`, `title`, `snippet`, `source`, `sha256` |
+| `search(query, limit=5, domain=None, date_from=None, date_to=None, review_status=None)` | Full-text search within the caller's scope (exact words first, then word variants by prefix), optionally narrowed by domain, period or review status. The query may be empty when a filter is given ([ADR 014](docs/adr/014-prefix-matching-and-filters.md)) | `id`, `domain`, `event_type`, `date`, `review_status`, `title`, `snippet`, `source`, `sha256` |
 | `read_entry(id)` | Read one full record | All fields plus `body` |
 
 ## Roadmap

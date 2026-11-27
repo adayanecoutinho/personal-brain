@@ -147,3 +147,46 @@ cases:
     query: heartburn medicine
     expected_ids: [use-2026-02-omeprazole]
     gating: false
+
+  # --- Word variants (prefix matching, ADR 014) ----------------------------
+  - id: variant-gastroenterologist
+    category: word_variants
+    question: When did I see the gastroenterologist?
+    query: gastroenterologist
+    expected_ids: [enc-2026-05-08-gastro, enc-2026-01-20-gastro]
+
+  - id: variant-dermatologist
+    category: word_variants
+    question: When did I see the dermatologist?
+    query: dermatologist
+    expected_ids: [enc-2026-03-12-derm]
+
+  # --- Period and status filters (ADR 014) ---------------------------------
+  - id: timeline-jan-feb
+    category: timeline
+    question: Show my health history from January to February 2026.
+    date_from: "2026-01"
+    date_to: "2026-02"
+    scope: [health]
+    expected_ids: [enc-2026-01-20-gastro, rx-2026-01-20-omeprazole, use-2026-02-omeprazole, exam-2026-02-10-pap]
+
+  - id: timeline-partial-date-overlaps
+    category: timeline
+    question: What happened in 2025?
+    date_from: "2025"
+    date_to: "2025"
+    expected_ids: [enc-2025-ophthalmology]
+
+  - id: timeline-empty-period
+    category: timeline
+    question: Anything recorded in 2024?
+    date_from: "2024"
+    date_to: "2024"
+    expect_empty: true
+
+  - id: pending-list
+    category: pending
+    question: What is still pending my review?
+    review_status: pending
+    expected_ids: [fu-2026-05-allergy, exam-2026-06-ultrasound]
+    expected_status: pending

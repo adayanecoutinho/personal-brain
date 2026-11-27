@@ -38,14 +38,34 @@ def create_server(db_path: Path, allowed_domains: Iterable[str] | None = None) -
     @server.tool(
         description=(
             "Search personal records by keywords, optionally within one domain "
-            f"(for example 'health' or 'training').{scope_note} {PENDING_NOTE}"
+            "(for example 'health' or 'training'). Optional filters: date_from and "
+            "date_to (YYYY, YYYY-MM or YYYY-MM-DD; a record with a partial date matches "
+            "when its period overlaps), and review_status ('pending' or 'confirmed'). "
+            "The query may be empty when a filter is given: results are then listed "
+            f"newest first.{scope_note} {PENDING_NOTE}"
         ),
         annotations=READ_ONLY,
     )
-    def search(query: str, limit: int = 5, domain: str | None = None) -> list[dict]:
-        return queries.search(
-            db_path, query, limit, queries.effective_domains(scope, domain)
-        )
+    def search(
+        query: str = "",
+        limit: int = 5,
+        domain: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        review_status: str | None = None,
+    ) -> list[dict] | dict:
+        try:
+            return queries.search(
+                db_path,
+                query,
+                limit,
+                queries.effective_domains(scope, domain),
+                date_from=date_from,
+                date_to=date_to,
+                review_status=review_status,
+            )
+        except queries.FilterError as exc:
+            return {"error": "invalid_filter", "detail": str(exc)}
 
     @server.tool(
         description=f"Read one full record by its id.{scope_note} {PENDING_NOTE}",

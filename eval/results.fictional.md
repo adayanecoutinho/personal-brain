@@ -1,4 +1,4 @@
-Cases: 20 · gating passed: 17/17 · scope violations: 0 · MRR: 0.962
+Cases: 26 · gating passed: 23/23 · scope violations: 0 · MRR: 0.972
 
 | Category | Passed | Gating |
 |---|---|---|
@@ -6,6 +6,8 @@ Cases: 20 · gating passed: 17/17 · scope violations: 0 · MRR: 0.962
 | exams | 3/3 | yes |
 | no_answer | 2/2 | yes |
 | paraphrase | 0/3 | no (informational) |
-| pending | 1/1 | yes |
+| pending | 2/2 | yes |
 | prescription_vs_use | 3/3 | yes |
 | scope | 4/4 | yes |
+| timeline | 3/3 | yes |
+| word_variants | 2/2 | yes |

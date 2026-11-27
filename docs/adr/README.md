@@ -6,7 +6,7 @@ Each ADR records one decision: the context, what was decided, the alternatives c
 |---|---|---|
 | [001](001-python-and-official-mcp-sdk.md) | Python and the official MCP SDK | Accepted |
 | [002](002-git-repository-as-source-of-truth.md) | A Git repository on the server is the source of truth | Accepted |
-| [003](003-sqlite-fts5-index.md) | SQLite FTS5 as a rebuildable index, before embeddings | Accepted |
+| [003](003-sqlite-fts5-index.md) | SQLite FTS5 as a rebuildable index, before embeddings | Accepted, amended by 014 |
 | [004](004-markdown-yaml-records.md) | Records as Markdown with YAML front matter | Accepted, amended by 011 |
 | [005](005-pending-before-confirmed.md) | Pending before confirmed | Accepted |
 | [006](006-read-only-tools-first.md) | Read-only tools first | Accepted |
@@ -17,3 +17,4 @@ Each ADR records one decision: the context, what was decided, the alternatives c
 | [011](011-domains-and-scopes.md) | Domains and per-client scopes | Accepted |
 | [012](012-invalid-records-degrade-gracefully.md) | Invalid records degrade gracefully and are reported as codes | Accepted |
 | [013](013-evaluation.md) | Retrieval evaluation with a fictional twin of the private set | Accepted |
+| [014](014-prefix-matching-and-filters.md) | Prefix matching, period and status filters | Accepted |

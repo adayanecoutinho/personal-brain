@@ -39,7 +39,15 @@ def load_cases(path: Path) -> list[dict]:
 
 def run_case(db: Path, case: dict) -> CaseResult:
     scope = case.get("scope")
-    results = search(db, case["query"], TOP_K, scope)
+    results = search(
+        db,
+        case.get("query", ""),
+        TOP_K,
+        scope,
+        date_from=case.get("date_from"),
+        date_to=case.get("date_to"),
+        review_status=case.get("review_status"),
+    )
     got_ids = [r["id"] for r in results]
     reasons: list[str] = []
 

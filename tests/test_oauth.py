@@ -27,6 +27,7 @@ from personal_brain.auth.app import build_authenticated_server, wrap_app
 from personal_brain.auth.config import load_auth_config, missing_auth_settings
 from personal_brain.auth.github import FakeGitHubIdentity
 from personal_brain.auth.logging import LOGIN_OK
+from personal_brain.auth.pages import safe_form_action_origin
 from personal_brain.auth.scopes import DOMAIN_SCOPES
 from personal_brain.auth.security import digest, new_token
 from personal_brain.auth.store import REUSE_GRACE_SECONDS, AuthStore, TokenRow
@@ -77,13 +78,20 @@ def _register_client(provider, redirect: str = REDIRECT, scopes=None) -> tuple[s
     return client_id, secret
 
 
-def _authorize(http: TestClient, client_id: str, challenge: str, scopes: str, state: str = "client-state") -> str:
+def _authorize(
+    http: TestClient,
+    client_id: str,
+    challenge: str,
+    scopes: str,
+    state: str = "client-state",
+    redirect_uri: str = REDIRECT,
+) -> str:
     response = http.get(
         "/authorize",
         params={
             "response_type": "code",
             "client_id": client_id,
-            "redirect_uri": REDIRECT,
+            "redirect_uri": redirect_uri,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "resource": RESOURCE,
@@ -391,7 +399,6 @@ def test_auth_pages_send_security_headers(tmp_path, db):
     assert "claude.ai" in consent.text
     expected = {
         "x-frame-options": "DENY",
-        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
     }
@@ -399,6 +406,78 @@ def test_auth_pages_send_security_headers(tmp_path, db):
         for name, value in expected.items():
             assert response.headers.get(name) == value
         assert response.headers.get("x-content-type-options") == "nosniff"
+    assert denied.headers.get("content-security-policy") == (
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'"
+    )
+    assert consent.headers.get("content-security-policy") == (
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://claude.ai; "
+        "frame-ancestors 'none'; base-uri 'none'"
+    )
+
+
+def _form_action(csp: str) -> list[str]:
+    for directive in csp.split(";"):
+        parts = directive.strip().split()
+        if parts and parts[0] == "form-action":
+            return parts[1:]
+    raise AssertionError(f"no form-action in {csp!r}")
+
+
+def test_consent_page_csp_allows_pending_redirect_origin(tmp_path, db):
+    http, provider, _, _ = _client_app(tmp_path, db)
+    client_id, _secret = _register_client(provider)
+    _verifier, challenge = _pkce()
+    github_state = _authorize(http, client_id, challenge, "brain:training:read")
+    consent = http.get(
+        "/oauth/github/callback",
+        params={"state": github_state, "code": "gh-code-1"},
+        follow_redirects=False,
+    )
+    assert consent.status_code == 200
+    csp = consent.headers["content-security-policy"]
+    assert "form-action 'self' https://claude.ai" in csp
+    assert _form_action(csp) == ["'self'", "https://claude.ai"]
+
+
+def test_denied_page_csp_keeps_form_action_self(tmp_path, db):
+    http, _, _, _ = _client_app(tmp_path, db)
+    denied = http.get("/oauth/github/callback", params={"state": "missing", "code": "x"})
+    assert denied.status_code == 403
+    assert _form_action(denied.headers["content-security-policy"]) == ["'self'"]
+
+
+def test_consent_csp_origin_strips_path_and_query(tmp_path, db):
+    http, provider, _, _ = _client_app(tmp_path, db)
+    redirect = "https://claude.ai/api/mcp/auth_callback?foo=bar"
+    client_id, _secret = _register_client(provider, redirect=redirect)
+    _verifier, challenge = _pkce()
+    github_state = _authorize(
+        http, client_id, challenge, "brain:training:read", redirect_uri=redirect
+    )
+    consent = http.get(
+        "/oauth/github/callback",
+        params={"state": github_state, "code": "gh-code-1"},
+        follow_redirects=False,
+    )
+    assert consent.status_code == 200
+    csp = consent.headers["content-security-policy"]
+    assert _form_action(csp) == ["'self'", "https://claude.ai"]
+    assert "/api/mcp/auth_callback" not in csp
+    assert "foo" not in csp
+    assert "?" not in csp
+
+
+def test_safe_form_action_origin():
+    assert (
+        safe_form_action_origin("https://claude.ai/api/mcp/auth_callback?foo=bar#x")
+        == "https://claude.ai"
+    )
+    assert safe_form_action_origin("https://claude.ai:443/path") == "https://claude.ai"
+    assert safe_form_action_origin("http://localhost:8787/cb") == "http://localhost:8787"
+    assert safe_form_action_origin("http://example.com/cb") is None
+    assert safe_form_action_origin("https://user:pass@claude.ai/cb") is None
+    assert safe_form_action_origin("not-a-url") is None
 
 
 def test_wrong_csrf_is_refused(tmp_path, db):

@@ -16,6 +16,8 @@ from contextlib import closing
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import pytest
+import yaml
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
@@ -586,6 +588,76 @@ def test_check_deploy_script_catches_proxy_labels_on_private_service(tmp_path):
     )
     bad.write_text(text, encoding="utf-8")
     assert module.main([str(bad)]) == 1
+
+
+def _load_check_deploy():
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("check_deploy", root / "scripts" / "check-deploy.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules["check_deploy"] = module
+    spec.loader.exec_module(module)
+    return root, module
+
+
+def _compose_without_labels(tmp_path):
+    root, _ = _load_check_deploy()
+    text = (root / "docker-compose.example.yml").read_text(encoding="utf-8")
+    start = text.index("    labels:\n")
+    end = text.index("    restart: unless-stopped", start)
+    path = tmp_path / "no-labels.yml"
+    path.write_text(text[:start] + text[end:], encoding="utf-8")
+    return path
+
+
+def test_check_deploy_private_only_accepts_compose_without_labels(tmp_path):
+    _, module = _load_check_deploy()
+    path = _compose_without_labels(tmp_path)
+    assert module.main(["--stage", "private-only", str(path)]) == 0
+    # The same file fails the default (public) stage: brain-public needs labels.
+    assert module.main([str(path)]) == 1
+    assert module.main(["--stage", "public", str(path)]) == 1
+
+
+def test_check_deploy_private_only_rejects_labels(tmp_path):
+    root, module = _load_check_deploy()
+    example = root / "docker-compose.example.yml"
+    assert module.main(["--stage", "private-only", str(example)]) == 1
+    errors = module.check(
+        yaml.safe_load(example.read_text(encoding="utf-8")), "private-only"
+    )
+    assert any("brain-public" in e for e in errors)
+
+    bad = tmp_path / "private-labels.yml"
+    text = _compose_without_labels(tmp_path).read_text(encoding="utf-8")
+    text = text.replace(
+        "    restart: unless-stopped\n\n  brain-public:",
+        "    labels:\n      - traefik.enable=true\n    restart: unless-stopped\n\n  brain-public:",
+        1,
+    )
+    bad.write_text(text, encoding="utf-8")
+    assert module.main(["--stage", "private-only", str(bad)]) == 1
+
+
+def test_check_deploy_public_stage_is_the_default_and_unchanged():
+    root, module = _load_check_deploy()
+    example = root / "docker-compose.example.yml"
+    assert module.main([str(example)]) == 0
+    assert module.main(["--stage", "public", str(example)]) == 0
+
+
+def test_check_deploy_rejects_unknown_stage(tmp_path):
+    root, module = _load_check_deploy()
+    with pytest.raises(SystemExit):
+        module.main(["--stage", "nope", str(root / "docker-compose.example.yml")])
+
+
+def test_dockerfile_prepares_auth_directory():
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "Dockerfile").read_text(encoding="utf-8")
+    assert "/data/auth" in text
+    assert "chown brain /data/index /data/auth" in text
+    assert "chmod 700 /data/auth" in text
 
 
 def test_log_check_passes_after_full_auth_flow(tmp_path, db):

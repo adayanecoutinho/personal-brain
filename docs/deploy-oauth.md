@@ -8,7 +8,16 @@ The deployment layout is in `docker-compose.example.yml`: two containers
 from the same image. `brain-private` is unchanged (no auth, no proxy labels,
 reached through the SSH tunnel). `brain-public` runs with `--auth` and is
 the only service with proxy labels. `scripts/check-deploy.py` verifies that
-split.
+split. Use `--stage private-only` while the public service is deployed without
+proxy labels (no Brain service may have any), and the default `--stage public`
+once the route is meant to open:
+
+```
+python scripts/check-deploy.py --stage private-only docker-compose.example.yml
+```
+
+(The example file itself has labels on `brain-public`, so it passes only in the
+`public` stage; check the compose you actually deploy.)
 
 ## 1. GitHub OAuth App
 
@@ -37,6 +46,22 @@ Set these variables on `brain-public` only (see `.env.example` for placeholders)
 
 Pass `--public-url` (the public origin, no trailing slash) and `--auth-db`
 (a persistent volume). The process refuses to start if any of these is missing.
+
+### The `/data/auth` volume
+
+The image creates `/data/auth` owned by uid 10001 (`brain`) with mode 700. A
+**new, empty named volume** mounted at `/data/auth` inherits that owner and
+mode on first use, so `docker-compose.example.yml` needs no preparation
+container. Docker does not do this in these cases, and the volume then needs a
+one-time `chown 10001` / `chmod 700`:
+
+- a volume that already exists with other ownership (for example one created
+  while an older image had no `/data/auth`);
+- a bind mount of a host directory, which keeps the host owner;
+- an orchestrator that creates the volume itself and does not copy the image
+  contents (some Kubernetes volume types).
+
+If the process cannot write `auth.db`, check the owner of `/data/auth` first.
 
 ## 4. Create the Claude client
 

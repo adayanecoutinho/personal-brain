@@ -1,5 +1,7 @@
 # Personal Brain MCP server.
 # Records are mounted read-only at /data/records; the index lives in a writable volume.
+# /data/auth (OAuth database) is created here, owned by uid 10001 with mode 700, so a new
+# named volume mounted there inherits that ownership and needs no preparation container.
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /usr/local/bin/uv
@@ -14,8 +16,9 @@ COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
 RUN useradd --system --uid 10001 --no-create-home brain \
-    && mkdir -p /data/records /data/index \
-    && chown brain /data/index
+    && mkdir -p /data/records /data/index /data/auth \
+    && chown brain /data/index /data/auth \
+    && chmod 700 /data/auth
 USER brain
 ENV PATH="/app/.venv/bin:$PATH"
 

@@ -7,6 +7,7 @@ license = "MIT"
 requires-python = ">=3.12"
 authors = [{ name = "Adayane Coutinho" }]
 dependencies = [
+    "httpx>=0.29.0",
     "mcp>=2.3,<3",
     "pyyaml>=6.0",
 ]
@@ -15,7 +16,10 @@ dependencies = [
 personal-brain = "personal_brain.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.17.6",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,3 +30,6 @@ packages = ["src/personal_brain"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/personal_brain/evaluation.py" = ["ISC004"]

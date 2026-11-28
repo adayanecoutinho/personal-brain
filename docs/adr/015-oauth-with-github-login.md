@@ -1,6 +1,6 @@
 # 015. Remote access with OAuth 2.1 and GitHub login
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by 016
 - **Date:** 2026-11-27
 - **Amends:** [ADR 008](008-tunnel-before-oauth.md) (details the phase 3 exposure it announced), [ADR 011](011-domains-and-scopes.md) (scopes now come from the token)
 

@@ -27,7 +27,7 @@ from personal_brain.auth.github import FakeGitHubIdentity
 from personal_brain.auth.logging import LOGIN_OK
 from personal_brain.auth.scopes import DOMAIN_SCOPES
 from personal_brain.auth.security import digest, new_token
-from personal_brain.auth.store import REUSE_GRACE_SECONDS, AuthStore
+from personal_brain.auth.store import REUSE_GRACE_SECONDS, AuthStore, TokenRow
 from personal_brain.cli import main
 from personal_brain.logcheck import find_leaks, make_canaries
 from personal_brain.server import create_server
@@ -250,24 +250,88 @@ def test_expired_token_is_refused(tmp_path, db):
     assert response.status_code == 401
 
 
-def test_refresh_reuse_grace_then_revokes_family(tmp_path, db):
-    http, provider, _, config = _client_app(tmp_path, db)
-    tokens = _full_login(http, provider)
-    body = {
+def _text_values(db_path: Path):
+    with closing(sqlite3.connect(db_path)) as conn:
+        tables = [row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )]
+        for table in tables:
+            rows = conn.execute(f'SELECT * FROM "{table}"').fetchall()
+            for row in rows:
+                for value in row:
+                    if isinstance(value, str):
+                        yield value
+
+
+def _assert_tokens_not_stored(db_path: Path, tokens: list[str]) -> None:
+    stored = list(_text_values(db_path))
+    for token in tokens:
+        assert token
+        assert all(token not in value for value in stored)
+
+
+def _mcp_status(http: TestClient, access_token: str) -> int:
+    return http.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        json={},
+    ).status_code
+
+
+def _refresh_body(tokens: dict, refresh_token: str) -> dict:
+    return {
         "grant_type": "refresh_token",
-        "refresh_token": tokens["refresh_token"],
+        "refresh_token": refresh_token,
         "client_id": tokens["client_id"],
         "client_secret": tokens["client_secret"],
     }
+
+
+def test_refresh_does_not_store_tokens_in_plaintext(tmp_path, db):
+    http, provider, _, config = _client_app(tmp_path, db)
+    tokens = _full_login(http, provider)
+    first = _form_post(http, "/token", _refresh_body(tokens, tokens["refresh_token"]))
+    assert first.status_code == 200, first.text
+    pair = first.json()
+    _assert_tokens_not_stored(
+        config.auth_db,
+        [
+            tokens["access_token"],
+            tokens["refresh_token"],
+            pair["access_token"],
+            pair["refresh_token"],
+        ],
+    )
+
+
+def test_refresh_reuse_within_grace_issues_a_new_working_pair(tmp_path, db):
+    http, provider, _, config = _client_app(tmp_path, db)
+    tokens = _full_login(http, provider)
+    body = _refresh_body(tokens, tokens["refresh_token"])
     first = _form_post(http, "/token", body)
     assert first.status_code == 200, first.text
     pair = first.json()
-    # Reuse inside the 60-second window returns the same new pair.
     second = _form_post(http, "/token", body)
-    assert second.status_code == 200
-    assert second.json()["access_token"] == pair["access_token"]
-    assert second.json()["refresh_token"] == pair["refresh_token"]
+    assert second.status_code == 200, second.text
+    other = second.json()
+    assert other["access_token"] != pair["access_token"]
+    assert other["refresh_token"] != pair["refresh_token"]
+    assert asyncio.run(provider.load_access_token(pair["access_token"])) is not None
+    assert asyncio.run(provider.load_access_token(other["access_token"])) is not None
+    _assert_tokens_not_stored(
+        config.auth_db,
+        [pair["access_token"], pair["refresh_token"], other["access_token"], other["refresh_token"]],
+    )
 
+
+def test_refresh_reuse_after_grace_revokes_the_family(tmp_path, db):
+    http, provider, _, config = _client_app(tmp_path, db)
+    tokens = _full_login(http, provider)
+    body = _refresh_body(tokens, tokens["refresh_token"])
+    first = _form_post(http, "/token", body)
+    pair = first.json()
+    second = _form_post(http, "/token", body)
+    other = second.json()
     old_digest = digest(PEPPER, tokens["refresh_token"])
     with closing(sqlite3.connect(config.auth_db)) as conn:
         conn.execute(
@@ -277,24 +341,131 @@ def test_refresh_reuse_grace_then_revokes_family(tmp_path, db):
         conn.commit()
     third = _form_post(http, "/token", body)
     assert third.status_code == 400
-    # The new pair is revoked with the family.
-    reused_new = _form_post(
+    for refresh in (pair["refresh_token"], other["refresh_token"]):
+        reused = _form_post(http, "/token", _refresh_body(tokens, refresh))
+        assert reused.status_code == 400
+    assert _mcp_status(http, pair["access_token"]) == 401
+    assert _mcp_status(http, other["access_token"]) == 401
+
+
+def test_expired_grace_rows_are_deleted_on_next_rotation(tmp_path, db):
+    http, provider, _, config = _client_app(tmp_path, db)
+    tokens = _full_login(http, provider)
+    first = _form_post(http, "/token", _refresh_body(tokens, tokens["refresh_token"]))
+    assert first.status_code == 200, first.text
+    pair = first.json()
+    old_digest = digest(PEPPER, tokens["refresh_token"])
+    with closing(sqlite3.connect(config.auth_db)) as conn:
+        conn.execute(
+            "UPDATE refresh_graces SET rotated_at = ? WHERE old_digest = ?",
+            (int(time.time()) - (REUSE_GRACE_SECONDS + 5), old_digest),
+        )
+        conn.commit()
+    later = _form_post(http, "/token", _refresh_body(tokens, pair["refresh_token"]))
+    assert later.status_code == 200, later.text
+    with closing(sqlite3.connect(config.auth_db)) as conn:
+        leftover = conn.execute(
+            "SELECT 1 FROM refresh_graces WHERE old_digest = ?", (old_digest,)
+        ).fetchone()
+        remaining = conn.execute("SELECT old_digest FROM refresh_graces").fetchall()
+    assert leftover is None
+    assert remaining  # the rotation that purged the old row still records its own grace
+
+
+def test_auth_pages_send_security_headers(tmp_path, db):
+    http, provider, _, _ = _client_app(tmp_path, db)
+    denied = http.get("/oauth/github/callback", params={"state": "missing", "code": "x"})
+    assert denied.status_code == 403
+    client_id, _secret = _register_client(provider)
+    _verifier, challenge = _pkce()
+    github_state = _authorize(http, client_id, challenge, "brain:training:read")
+    consent = http.get(
+        "/oauth/github/callback",
+        params={"state": github_state, "code": "gh-code-1"},
+        follow_redirects=False,
+    )
+    assert consent.status_code == 200
+    assert client_id in consent.text
+    assert "claude.ai" in consent.text
+    expected = {
+        "x-frame-options": "DENY",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+    }
+    for response in (denied, consent):
+        for name, value in expected.items():
+            assert response.headers.get(name) == value
+        assert response.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_wrong_csrf_is_refused(tmp_path, db):
+    http, provider, _, _ = _client_app(tmp_path, db)
+    client_id, _secret = _register_client(provider)
+    _verifier, challenge = _pkce()
+    github_state = _authorize(http, client_id, challenge, "brain:training:read")
+    callback = http.get(
+        "/oauth/github/callback",
+        params={"state": github_state, "code": "gh-code-1"},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 200
+    pending = provider.store.get_pending_by_state(github_state)
+    assert pending is not None
+    refused = _form_post(
         http,
-        "/token",
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": pair["refresh_token"],
-            "client_id": tokens["client_id"],
-            "client_secret": tokens["client_secret"],
-        },
+        f"/oauth/consent?request={pending.id}",
+        [("csrf", "this-is-not-the-csrf-token"), ("scope", "brain:training:read")],
+        follow_redirects=False,
     )
-    assert reused_new.status_code == 400
-    protected = http.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {pair['access_token']}", "Content-Type": "application/json"},
-        json={},
+    assert refused.status_code == 403
+    assert "location" not in {k.lower() for k in refused.headers}
+    still = provider.store.get_pending(pending.id)
+    assert still is not None
+
+
+def test_consent_without_domains_does_not_issue_a_code(tmp_path, db):
+    http, provider, _, _ = _client_app(tmp_path, db)
+    client_id, _secret = _register_client(provider)
+    _verifier, challenge = _pkce()
+    github_state = _authorize(http, client_id, challenge, "brain:training:read")
+    callback = http.get(
+        "/oauth/github/callback",
+        params={"state": github_state, "code": "gh-code-1"},
+        follow_redirects=False,
     )
-    assert protected.status_code == 401
+    assert callback.status_code == 200
+    pending = provider.store.get_pending_by_state(github_state)
+    assert pending is not None and pending.consent_csrf
+    refused = _form_post(
+        http,
+        f"/oauth/consent?request={pending.id}",
+        [("csrf", pending.consent_csrf)],
+        follow_redirects=False,
+    )
+    assert refused.status_code == 403
+    assert provider.store.get_pending(pending.id) is not None
+
+
+def test_try_rotate_refresh_claims_a_token_once(tmp_path):
+    store = AuthStore(tmp_path / "auth.db")
+    token_digest = digest(PEPPER, "refresh-placeholder")
+    family_id = "family-1"
+    store.save_refresh_token(
+        TokenRow(
+            token_digest=token_digest,
+            client_id="client",
+            scopes=["brain:training:read"],
+            expires_at=int(time.time()) + 60,
+            resource=RESOURCE,
+            subject=str(ALLOWED_ID),
+            family_id=family_id,
+            revoked=False,
+        )
+    )
+    assert store.try_rotate_refresh(token_digest, family_id) is True
+    assert store.try_rotate_refresh(token_digest, family_id) is False
+    assert store.get_refresh_token(token_digest).revoked is True
 
 
 def test_training_scope_does_not_see_health_records(tmp_path, db):

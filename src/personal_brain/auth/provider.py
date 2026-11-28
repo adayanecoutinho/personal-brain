@@ -154,40 +154,46 @@ class BrainOAuthProvider:
         if row is None:
             raise TokenError(error="invalid_grant", error_description="invalid refresh token")
 
-        if row.revoked and row.rotated_at is not None:
-            grace = self.store.get_grace(old_digest)
-            if grace is not None and now - grace.rotated_at <= REUSE_GRACE_SECONDS:
-                authlog.event(authlog.TOKEN_REFRESHED, "grace")
-                return OAuthToken(
-                    access_token=grace.new_access_token,
-                    token_type="bearer",
-                    expires_in=ACCESS_TTL_SECONDS,
-                    scope=" ".join(scopes) if scopes else None,
-                    refresh_token=grace.new_refresh_token,
-                )
+        self.store.purge_expired_graces(now)
+
+        if row.revoked and not self.store.family_has_live_tokens(row.family_id):
+            raise TokenError(error="invalid_grant", error_description="invalid refresh token")
+
+        if row.expires_at < now and not row.revoked:
+            raise TokenError(error="invalid_grant", error_description="invalid refresh token")
+
+        claimed = self.store.try_rotate_refresh(old_digest, row.family_id, now)
+        if claimed:
+            new_tokens = self._issue_pair(
+                client_id=client.client_id,
+                scopes=scopes,
+                resource=row.resource,
+                subject=row.subject,
+                family_id=row.family_id,
+            )
+            authlog.event(authlog.TOKEN_REFRESHED, "ok")
+            return new_tokens
+
+        grace = self.store.get_grace(old_digest)
+        if grace is not None and now - grace.rotated_at <= REUSE_GRACE_SECONDS:
+            if not self.store.family_has_live_tokens(row.family_id):
+                raise TokenError(error="invalid_grant", error_description="invalid refresh token")
+            new_tokens = self._issue_pair(
+                client_id=client.client_id,
+                scopes=scopes,
+                resource=row.resource,
+                subject=row.subject,
+                family_id=row.family_id,
+            )
+            authlog.event(authlog.TOKEN_REFRESHED, "grace")
+            return new_tokens
+
+        if row.revoked:
             self.store.revoke_family(row.family_id)
             authlog.event(authlog.REFRESH_REUSE_REVOKED, "revoked")
             raise TokenError(error="invalid_grant", error_description="refresh token reuse")
 
-        if row.revoked or row.expires_at < now:
-            raise TokenError(error="invalid_grant", error_description="invalid refresh token")
-
-        new_tokens = self._issue_pair(
-            client_id=client.client_id,
-            scopes=scopes,
-            resource=row.resource,
-            subject=row.subject,
-            family_id=row.family_id,
-        )
-        self.store.rotate_refresh(
-            old_digest,
-            row.family_id,
-            new_tokens.access_token,
-            new_tokens.refresh_token or "",
-            now,
-        )
-        authlog.event(authlog.TOKEN_REFRESHED, "ok")
-        return new_tokens
+        raise TokenError(error="invalid_grant", error_description="invalid refresh token")
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         row = self.store.get_access_token(digest(self.config.token_pepper, token))

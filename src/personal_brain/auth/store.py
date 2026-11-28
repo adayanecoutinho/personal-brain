@@ -77,8 +77,6 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 CREATE TABLE IF NOT EXISTS refresh_graces (
     old_digest TEXT PRIMARY KEY,
     family_id TEXT NOT NULL,
-    new_access_token TEXT NOT NULL,
-    new_refresh_token TEXT NOT NULL,
     rotated_at INTEGER NOT NULL
 );
 """
@@ -138,11 +136,10 @@ class TokenRow:
 
 
 @dataclass(frozen=True)
-class GracePair:
-    new_access_token: str
-    new_refresh_token: str
-    rotated_at: int
+class GraceRecord:
+    old_digest: str
     family_id: str
+    rotated_at: int
 
 
 def _now() -> int:
@@ -162,6 +159,7 @@ class AuthStore:
         self.path = path
         with closing(_connect(path)) as conn:
             conn.executescript(SCHEMA)
+            _migrate_refresh_graces(conn)
             conn.commit()
 
     def _run(self, fn):
@@ -419,42 +417,69 @@ class AuthStore:
 
         return self._run(work)
 
-    def rotate_refresh(
-        self,
-        old_digest: str,
-        family_id: str,
-        new_access_token: str,
-        new_refresh_token: str,
-        now: int | None = None,
-    ) -> None:
-        stamp = now or _now()
+    def purge_expired_graces(self, now: int | None = None) -> None:
+        cutoff = (now or _now()) - REUSE_GRACE_SECONDS
 
         def work(conn: sqlite3.Connection) -> None:
-            conn.execute(
-                "UPDATE refresh_tokens SET revoked = 1, rotated_at = ? WHERE token_digest = ?",
-                (stamp, old_digest),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO refresh_graces"
-                " (old_digest, family_id, new_access_token, new_refresh_token, rotated_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (old_digest, family_id, new_access_token, new_refresh_token, stamp),
-            )
+            conn.execute("DELETE FROM refresh_graces WHERE rotated_at < ?", (cutoff,))
 
         self._run(work)
 
-    def get_grace(self, old_digest: str) -> GracePair | None:
-        def work(conn: sqlite3.Connection) -> GracePair | None:
+    def family_has_live_tokens(self, family_id: str) -> bool:
+        def work(conn: sqlite3.Connection) -> bool:
+            access = conn.execute(
+                "SELECT 1 FROM access_tokens WHERE family_id = ? AND revoked = 0 LIMIT 1",
+                (family_id,),
+            ).fetchone()
+            refresh = conn.execute(
+                "SELECT 1 FROM refresh_tokens WHERE family_id = ? AND revoked = 0 LIMIT 1",
+                (family_id,),
+            ).fetchone()
+            return access is not None or refresh is not None
+
+        return self._run(work)
+
+    def try_rotate_refresh(
+        self,
+        old_digest: str,
+        family_id: str,
+        now: int | None = None,
+    ) -> bool:
+        """Atomically claim an unused refresh token. Returns False if it was already rotated."""
+        stamp = now or _now()
+        cutoff = stamp - REUSE_GRACE_SECONDS
+
+        def work(conn: sqlite3.Connection) -> bool:
+            conn.execute("DELETE FROM refresh_graces WHERE rotated_at < ?", (cutoff,))
+            cursor = conn.execute(
+                "UPDATE refresh_tokens SET revoked = 1, rotated_at = ?"
+                " WHERE token_digest = ? AND revoked = 0",
+                (stamp, old_digest),
+            )
+            if cursor.rowcount == 0:
+                return False
+            conn.execute(
+                "INSERT OR REPLACE INTO refresh_graces (old_digest, family_id, rotated_at)"
+                " VALUES (?, ?, ?)",
+                (old_digest, family_id, stamp),
+            )
+            return True
+
+        return self._run(work)
+
+    def get_grace(self, old_digest: str) -> GraceRecord | None:
+        def work(conn: sqlite3.Connection) -> GraceRecord | None:
             row = conn.execute(
-                "SELECT * FROM refresh_graces WHERE old_digest = ?", (old_digest,)
+                "SELECT old_digest, family_id, rotated_at FROM refresh_graces"
+                " WHERE old_digest = ?",
+                (old_digest,),
             ).fetchone()
             if row is None:
                 return None
-            return GracePair(
-                new_access_token=row["new_access_token"],
-                new_refresh_token=row["new_refresh_token"],
-                rotated_at=row["rotated_at"],
+            return GraceRecord(
+                old_digest=row["old_digest"],
                 family_id=row["family_id"],
+                rotated_at=row["rotated_at"],
             )
 
         return self._run(work)
@@ -494,6 +519,29 @@ class AuthStore:
             conn.execute("DELETE FROM pending_requests")
 
         self._run(work)
+
+
+
+def _migrate_refresh_graces(conn: sqlite3.Connection) -> None:
+    """Drop a pre-016 grace table that stored tokens in plaintext. No production db yet."""
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(refresh_graces)").fetchall()]
+    if not columns:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS refresh_graces ("
+            " old_digest TEXT PRIMARY KEY,"
+            " family_id TEXT NOT NULL,"
+            " rotated_at INTEGER NOT NULL)"
+        )
+        return
+    if set(columns) == {"old_digest", "family_id", "rotated_at"}:
+        return
+    conn.execute("DROP TABLE refresh_graces")
+    conn.execute(
+        "CREATE TABLE refresh_graces ("
+        " old_digest TEXT PRIMARY KEY,"
+        " family_id TEXT NOT NULL,"
+        " rotated_at INTEGER NOT NULL)"
+    )
 
 
 def _pending_from_row(row: sqlite3.Row) -> PendingRequest:

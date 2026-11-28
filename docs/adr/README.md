@@ -18,4 +18,5 @@ Each ADR records one decision: the context, what was decided, the alternatives c
 | [012](012-invalid-records-degrade-gracefully.md) | Invalid records degrade gracefully and are reported as codes | Accepted |
 | [013](013-evaluation.md) | Retrieval evaluation with a fictional twin of the private set | Accepted |
 | [014](014-prefix-matching-and-filters.md) | Prefix matching, period and status filters | Accepted |
-| [015](015-oauth-with-github-login.md) | Remote access with OAuth 2.1 and GitHub login | Accepted |
+| [015](015-oauth-with-github-login.md) | Remote access with OAuth 2.1 and GitHub login | Accepted, amended by 016 |
+| [016](016-refresh-grace-without-stored-tokens.md) | Refresh grace window without stored tokens | Accepted |

@@ -4,7 +4,32 @@ from __future__ import annotations
 
 import html
 
+from starlette.responses import HTMLResponse, Response
+
 from .scopes import SCOPE_TO_DOMAIN
+
+AUTH_PAGE_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; "
+        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    ),
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+def apply_auth_headers(response: Response) -> Response:
+    """Attach the anti-clickjacking and cache headers used on every auth page."""
+    for name, value in AUTH_PAGE_HEADERS.items():
+        response.headers[name] = value
+    return response
+
+
+def html_auth_response(content: str, status_code: int = 200) -> HTMLResponse:
+    return apply_auth_headers(HTMLResponse(content, status_code=status_code))
+
 
 DENIED_HTML = """<!DOCTYPE html>
 <html lang="pt-BR">
@@ -28,7 +53,14 @@ def denied_page() -> str:
     return DENIED_HTML
 
 
-def consent_page(*, action: str, csrf: str, scopes: list[str]) -> str:
+def consent_page(
+    *,
+    action: str,
+    csrf: str,
+    scopes: list[str],
+    client_id: str,
+    redirect_host: str,
+) -> str:
     boxes = []
     for scope in scopes:
         domain = SCOPE_TO_DOMAIN.get(scope)
@@ -42,6 +74,8 @@ def consent_page(*, action: str, csrf: str, scopes: list[str]) -> str:
     fields = "\n      ".join(boxes) or "<p>Nenhum domínio solicitado.</p>"
     action_esc = html.escape(action, quote=True)
     csrf_esc = html.escape(csrf, quote=True)
+    client_esc = html.escape(client_id)
+    host_esc = html.escape(redirect_host)
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -56,6 +90,8 @@ def consent_page(*, action: str, csrf: str, scopes: list[str]) -> str:
 </head>
 <body>
   <h1>Conceder acesso</h1>
+  <p>Cliente: {client_esc}</p>
+  <p>Retorno: {host_esc}</p>
   <p>Marque os domínios que este cliente pode ler. Nada é concedido por padrão.</p>
   <form method="post" action="{action_esc}">
     <input type="hidden" name="csrf" value="{csrf_esc}">

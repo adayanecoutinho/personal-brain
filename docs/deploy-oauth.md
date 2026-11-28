@@ -59,3 +59,11 @@ A later, separate change applies the public service and opens the proxy route.
 That step is outside this document and happens only after a security review
 and an explicit approval. `personal-brain auth revoke-all` signs every client
 out without deleting the pre-registered client.
+
+## 6. Rate limit
+
+The public process applies a simple in-process limit of 60 requests per minute,
+per client address, on `/authorize`, `/token` and `/oauth/github/callback`.
+A request over the limit receives `429` with `Retry-After: 60`. This is not a
+substitute for limits at the reverse proxy.
+

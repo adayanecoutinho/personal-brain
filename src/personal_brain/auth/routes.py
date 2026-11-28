@@ -11,7 +11,13 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from . import logging as authlog
-from .pages import apply_auth_headers, consent_page, denied_page, html_auth_response
+from .pages import (
+    apply_auth_headers,
+    consent_page,
+    denied_page,
+    html_auth_response,
+    safe_form_action_origin,
+)
 from .provider import BrainOAuthProvider
 from .scopes import SCOPE_TO_DOMAIN
 from .security import new_id
@@ -62,7 +68,8 @@ def register_auth_pages(server, provider: BrainOAuthProvider) -> None:
                 scopes=pending.scopes,
                 client_id=pending.client_id,
                 redirect_host=host,
-            )
+            ),
+            form_action_origin=safe_form_action_origin(pending.redirect_uri),
         )
 
     @server.custom_route("/oauth/consent", methods=["POST"], include_in_schema=False)

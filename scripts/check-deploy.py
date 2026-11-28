@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Fail if the private Brain service is on the proxy or the public one lacks --auth."""
+"""Fail if the Brain deploy layout is wrong for the chosen stage.
+
+Stages:
+  private-only  Stage A. No Brain service (brain-*) may have proxy labels.
+  public        Default. brain-public needs proxy labels and --auth; brain-private
+                must not have proxy labels.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +22,8 @@ except ImportError:
 PROXY_HINTS = ("traefik.", "caddy.", "coolify.proxy")
 PRIVATE_SERVICE = "brain-private"
 PUBLIC_SERVICE = "brain-public"
+BRAIN_PREFIX = "brain-"
+STAGES = ("private-only", "public")
 
 
 def _as_list(value) -> list[str]:
@@ -49,7 +57,22 @@ def _has_proxy_labels(service: dict) -> bool:
     return any(hint in text for hint in PROXY_HINTS)
 
 
-def check(compose: dict) -> list[str]:
+def check_private_only(compose: dict) -> list[str]:
+    services = compose.get("services") or {}
+    errors: list[str] = []
+    if PRIVATE_SERVICE not in services:
+        errors.append(f"missing service: {PRIVATE_SERVICE}")
+    for name, service in services.items():
+        if name.startswith(BRAIN_PREFIX) and _has_proxy_labels(service or {}):
+            errors.append(f"{name} must not have proxy labels in stage private-only")
+    return errors
+
+
+def check(compose: dict, stage: str = "public") -> list[str]:
+    if stage == "private-only":
+        return check_private_only(compose)
+    if stage != "public":
+        raise ValueError(f"unknown stage: {stage}")
     services = compose.get("services") or {}
     errors: list[str] = []
     if PRIVATE_SERVICE not in services:
@@ -76,14 +99,20 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path("docker-compose.example.yml"),
     )
+    parser.add_argument(
+        "--stage",
+        choices=STAGES,
+        default="public",
+        help="private-only: no Brain service on the proxy; public: brain-public on the proxy with --auth",
+    )
     args = parser.parse_args(argv)
     compose = yaml.safe_load(args.compose_file.read_text(encoding="utf-8"))
-    errors = check(compose)
+    errors = check(compose, args.stage)
     if errors:
         for item in errors:
             print(f"FAIL: {item}", file=sys.stderr)
         return 1
-    print("PASS: deploy layout looks correct")
+    print(f"PASS: deploy layout looks correct (stage {args.stage})")
     return 0
 
 

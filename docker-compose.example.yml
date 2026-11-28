@@ -51,6 +51,7 @@ services:
     volumes:
       - records:/data/records:ro
       - index-public:/data/index
+      # New named volume: inherits owner 10001, mode 700 from the image. No init container.
       - auth:/data/auth
     labels:
       - traefik.enable=true

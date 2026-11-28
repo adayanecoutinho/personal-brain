@@ -41,6 +41,15 @@ jobs:
           uv run personal-brain check-logs --url http://127.0.0.1:8000/mcp --logs-command "docker logs pb"
       - name: Container runs as non-root
         run: test "$(docker exec pb id -u)" != "0"
+      - name: /data/auth exists in the image, owner 10001, mode 700
+        run: |
+          test "$(docker run --rm --entrypoint stat personal-brain:ci -c '%u %a' /data/auth)" = "10001 700"
+      - name: A new named volume on /data/auth is writable without a preparation container
+        run: |
+          docker volume create pb-auth-ci
+          docker run --rm -v pb-auth-ci:/data/auth --entrypoint sh personal-brain:ci \
+            -c 'touch /data/auth/probe && test "$(stat -c %u /data/auth)" = 10001'
+          docker volume rm pb-auth-ci
 
   secret-scan:
     runs-on: ubuntu-latest
